@@ -214,7 +214,10 @@ class GNN_nl(nn.Module):
         Wl=self.w_comp_last(x, W_init)
         out = self.layer_last([Wl, x])[1]
 
-        return out[:, 0, :]
+        if self.args.transductive:
+            return out[:, :self.args.train_N_way, :]
+        else:
+            return out[:, 0, :]
 
 class GNN_active(nn.Module):
     def __init__(self, args, input_features, nf, J):
@@ -349,5 +352,3 @@ if __name__ == '__main__':
     # gnn = GNN(num_features, num_layers, J)
     # out = gnn(input)
     # print(out.size())
-
-

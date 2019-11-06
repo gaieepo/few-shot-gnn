@@ -44,23 +44,42 @@ class Generator(data.Dataset):
             rotated_image[channel, :, :] = np.rot90(image[channel, :, :], k=times)
         return rotated_image
 
-    def get_task_batch(self, batch_size=5, n_way=20, num_shots=1, unlabeled_extra=0, cuda=False, variable=False):
+    def get_task_batch(self, batch_size=5, n_way=20, num_shots=1, transductive=False, unlabeled_extra=0, cuda=False, variable=False):
         # Init variables
-        batch_x = np.zeros((batch_size, self.input_channels, self.size[0], self.size[1]), dtype='float32')
-        labels_x = np.zeros((batch_size, n_way), dtype='float32')
-        labels_x_global = np.zeros(batch_size, dtype='int64')
+        # xs stands for list consists of multiple queries (num_queries == n_way)
+        batch_xs, labels_xs, labels_xs_global = [], [], []
+
+        # should consider remove single query initialization
+        # batch_x = np.zeros((batch_size, self.input_channels, self.size[0], self.size[1]), dtype='float32')
+        # labels_x = np.zeros((batch_size, n_way), dtype='float32')
+        # labels_x_global = np.zeros(batch_size, dtype='int64')
+
         target_distances = np.zeros((batch_size, n_way * num_shots), dtype='float32')
-        hidden_labels = np.zeros((batch_size, n_way * num_shots + 1), dtype='float32')
+        hidden_labels = np.zeros((batch_size, n_way * num_shots + n_way), dtype='float32')
+
         numeric_labels = []
         batches_xi, labels_yi, oracles_yi = [], [], []
-        for i in range(n_way*num_shots):
+
+        for i in range(n_way * num_shots):
             batches_xi.append(np.zeros((batch_size, self.input_channels, self.size[0], self.size[1]), dtype='float32'))
             labels_yi.append(np.zeros((batch_size, n_way), dtype='float32'))
             oracles_yi.append(np.zeros((batch_size, n_way), dtype='float32'))
-        # Iterate over tasks for the same batch
 
+        # both case return list (len(list) == 1 vs n_ways)
+        if transductive:
+            for i in range(n_way):
+                batch_xs.append(np.zeros((batch_size, self.input_channels, self.size[0], self.size[1]), dtype='float32'))
+                labels_xs.append(np.zeros((batch_size, n_way), dtype='float32'))
+                labels_xs_global.append(np.zeros(batch_size, dtype='int64'))
+        else:
+            batch_xs.append(np.zeros((batch_size, self.input_channels, self.size[0], self.size[1]), dtype='float32'))
+            labels_xs.append(np.zeros((batch_size, n_way), dtype='float32'))
+            labels_xs_global.append(np.zeros(batch_size, dtype='int64'))
+
+        # Iterate over tasks for the same batch
         for batch_counter in range(batch_size):
-            positive_class = random.randint(0, n_way - 1)
+            # class selected for query (not applicable for transductive)
+            positive_class = random.randint(0, n_way - 1) # [0, n_way-1]
 
             # Sample random classes for this TASK
             classes_ = list(self.data.keys())
@@ -69,13 +88,21 @@ class Generator(data.Dataset):
 
             counter = 0
             for class_counter, class_ in enumerate(sampled_classes):
-                if class_counter == positive_class:
-                    # We take num_shots + one sample for one class
-                    samples = random.sample(self.data[class_], num_shots+1)
-                    # Test sample is loaded
-                    batch_x[batch_counter, :, :, :] = samples[0]
-                    labels_x[batch_counter, class_counter] = 1
-                    labels_x_global[batch_counter] = self.class_encoder[class_]
+                if transductive:
+                    # every class take num_shots + 1
+                    samples = random.sample(self.data[class_], num_shots + 1)
+                    # take first sample for all classes
+                    batch_xs[class_counter][batch_counter, :, :, :] = samples[0]
+                    labels_xs[class_counter][batch_counter, class_counter] = 1
+                    labels_xs_global[class_counter][batch_counter] = self.class_encoder[class_]
+                    samples = samples[1::]
+                elif class_counter == positive_class:  # non-transductive
+                    # We take num_shots + 1 samples for one class
+                    samples = random.sample(self.data[class_], num_shots + 1)
+                    # Test sample is loaded (1st sample)
+                    batch_xs[0][batch_counter, :, :, :] = samples[0]
+                    labels_xs[0][batch_counter, class_counter] = 1  # one-hot
+                    labels_xs_global[0][batch_counter] = self.class_encoder[class_]
                     samples = samples[1::]
                 else:
                     samples = random.sample(self.data[class_], num_shots)
@@ -91,17 +118,25 @@ class Generator(data.Dataset):
                     target_distances[batch_counter, indexes_perm[counter]] = 0
                     counter += 1
 
-            numeric_labels.append(positive_class)
+            numeric_labels.append(positive_class)  # this is not returned
+
+        batch_xs = [torch.from_numpy(batch_x) for batch_x in batch_xs]
+        labels_xs = [torch.from_numpy(labels_x) for labels_x in labels_xs]
+        labels_xs_global = [torch.from_numpy(labels_x_global) for labels_x_global in labels_xs_global]
 
         batches_xi = [torch.from_numpy(batch_xi) for batch_xi in batches_xi]
         labels_yi = [torch.from_numpy(label_yi) for label_yi in labels_yi]
         oracles_yi = [torch.from_numpy(oracle_yi) for oracle_yi in oracles_yi]
 
-        labels_x_scalar = np.argmax(labels_x, 1)
+        labels_xs_scalar = [np.argmax(labels_x, 1) for labels_x in labels_xs]  # discrete
 
-        return_arr = [torch.from_numpy(batch_x), torch.from_numpy(labels_x), torch.from_numpy(labels_x_scalar),
-                      torch.from_numpy(labels_x_global), batches_xi, labels_yi, oracles_yi,
+        # return_arr = [torch.from_numpy(batch_x), torch.from_numpy(labels_x), torch.from_numpy(labels_x_scalar),
+        #               torch.from_numpy(labels_x_global), batches_xi, labels_yi, oracles_yi,
+        #               torch.from_numpy(hidden_labels)]
+        return_arr = [batch_xs, labels_xs, labels_xs_scalar, labels_xs_global,
+                      batches_xi, labels_yi, oracles_yi,
                       torch.from_numpy(hidden_labels)]
+
         if cuda:
             return_arr = self.cast_cuda(return_arr)
         if variable:

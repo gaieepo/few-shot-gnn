@@ -59,6 +59,11 @@ parser.add_argument('--dataset', type=str, default='mini_imagenet', metavar='N',
                     help='omniglot')
 parser.add_argument('--dec_lr', type=int, default=10000, metavar='N',
                     help='Decreasing the learning rate every x iterations')
+# customized
+parser.add_argument('--transductive', action='store_true',
+                    help='enables transductive training')
+parser.add_argument('--gpu', type=int, default=0,
+                    help='indicate which gpu to run')
 args = parser.parse_args()
 
 
@@ -87,23 +92,27 @@ else:
 
 def train_batch(model, data):
     [enc_nn, metric_nn, softmax_module] = model
-    [batch_x, label_x, batches_xi, labels_yi, oracles_yi, hidden_labels] = data
+    # [batch_x, label_x, batches_xi, labels_yi, oracles_yi, hidden_labels] = data
+    [batch_xs, label_xs, batches_xi, labels_yi, oracles_yi, hidden_labels] = data
 
     # Compute embedding from x and xi_s
-    z = enc_nn(batch_x)[-1]
+    # z = enc_nn(batch_x)[-1]
+    zs = [enc_nn(batch_x)[-1] for batch_x in batch_xs]
     zi_s = [enc_nn(batch_xi)[-1] for batch_xi in batches_xi]
 
     # Compute metric from embeddings
-    out_metric, out_logits = metric_nn(inputs=[z, zi_s, labels_yi, oracles_yi, hidden_labels])
+    out_metric, out_logits = metric_nn(inputs=[zs, zi_s, labels_yi, oracles_yi, hidden_labels])
     logsoft_prob = softmax_module.forward(out_logits)
+    logsoft_prob = logsoft_prob.view(-1, logsoft_prob.shape[-1])  # for nll_loss
 
     # Loss
-    label_x_numpy = label_x.cpu().data.numpy()
-    formatted_label_x = np.argmax(label_x_numpy, axis=1)
-    formatted_label_x = Variable(torch.LongTensor(formatted_label_x))
+    # label_x_numpy = label_x.cpu().data.numpy()
+    label_xs_numpy = [label_x.cpu().data.numpy() for label_x in label_xs]
+    formatted_label_xs = [Variable(torch.LongTensor(np.argmax(label_x_numpy, axis=-1))) for label_x_numpy in label_xs_numpy]
+    formatted_label_xs = torch.cat(formatted_label_xs)  # for nll_loss
     if args.cuda:
-        formatted_label_x = formatted_label_x.cuda()
-    loss = F.nll_loss(logsoft_prob, formatted_label_x)
+        formatted_label_xs = formatted_label_xs.cuda()
+    loss = F.nll_loss(logsoft_prob, formatted_label_xs)
     loss.backward()
 
     return loss
@@ -148,14 +157,15 @@ def train():
         ####################
         data = train_loader.get_task_batch(batch_size=args.batch_size, n_way=args.train_N_way,
                                            unlabeled_extra=args.unlabeled_extra, num_shots=args.train_N_shots,
-                                           cuda=args.cuda, variable=True)
-        [batch_x, label_x, _, _, batches_xi, labels_yi, oracles_yi, hidden_labels] = data
+                                           cuda=args.cuda, variable=True, transductive=args.transductive)
+        # [batch_x, label_x, _, _, batches_xi, labels_yi, oracles_yi, hidden_labels] = data
+        [batch_xs, label_xs, _, _, batches_xi, labels_yi, oracles_yi, hidden_labels] = data
 
         opt_enc_nn.zero_grad()
         opt_metric_nn.zero_grad()
 
         loss_d_metric = train_batch(model=[enc_nn, metric_nn, softmax_module],
-                                    data=[batch_x, label_x, batches_xi, labels_yi, oracles_yi, hidden_labels])
+                                    data=[batch_xs, label_xs, batches_xi, labels_yi, oracles_yi, hidden_labels])
 
         opt_enc_nn.step()
         opt_metric_nn.step()
@@ -167,7 +177,8 @@ def train():
         # Display
         ####################
         counter += 1
-        total_loss += loss_d_metric.data[0]
+        # total_loss += loss_d_metric.data[0]
+        total_loss += loss_d_metric.item()
         if batch_idx % args.log_interval == 0:
                 display_str = 'Train Iter: {}'.format(batch_idx)
                 display_str += '\tLoss_d_metric: {:.6f}'.format(total_loss/counter)
@@ -222,5 +233,3 @@ def adjust_learning_rate(optimizers, lr, iter):
 
 if __name__ == "__main__":
     train()
-
-

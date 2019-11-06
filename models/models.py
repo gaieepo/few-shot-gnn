@@ -113,6 +113,9 @@ class MetricNN(nn.Module):
                 self.gnn_obj = gnn_iclr.GNN_nl(args, num_inputs, nf=96, J=1)
             elif 'omniglot' in self.args.dataset:
                 self.gnn_obj = gnn_iclr.GNN_nl_omniglot(args, num_inputs, nf=96, J=1)
+            elif 'tiered' in self.args.dataset:
+                # TODO tiered imagenet dataset
+                pass
         elif self.metric_network == 'gnn_iclr_active':
             assert(self.args.train_N_way == self.args.test_N_way)
             num_inputs = self.emb_size + self.args.train_N_way
@@ -120,20 +123,23 @@ class MetricNN(nn.Module):
         else:
             raise NotImplementedError
 
-    def gnn_iclr_forward(self, z, zi_s, labels_yi):
+    def gnn_iclr_forward(self, zs, zi_s, labels_yi):
         # Creating WW matrix
-        zero_pad = Variable(torch.zeros(labels_yi[0].size()))
-        if self.args.cuda:
-            zero_pad = zero_pad.cuda()
+        assert self.args.cuda
+        # zero_pad = Variable(torch.zeros(labels_yi[0].size()))
+        # if self.args.cuda:
+        #     zero_pad = zero_pad.cuda()
+        # labels_yi = [zero_pad] + labels_yi
+        zi_s = zs + zi_s
 
-        labels_yi = [zero_pad] + labels_yi
-        zi_s = [z] + zi_s
+        for _ in zs:
+            labels_yi.insert(0, Variable(torch.zeros(labels_yi[0].size())).cuda())
 
         nodes = [torch.cat([zi, label_yi], 1) for zi, label_yi in zip(zi_s, labels_yi)]
         nodes = [node.unsqueeze(1) for node in nodes]
-        nodes = torch.cat(nodes, 1)
+        nodes = torch.cat(nodes, 1)  # (40, 30, 128 + 5)
 
-        logits = self.gnn_obj(nodes).squeeze(-1)
+        logits = self.gnn_obj(nodes).squeeze(-1)  # squeeze assume one sample
         outputs = F.sigmoid(logits)
 
         return outputs, logits
@@ -162,12 +168,12 @@ class MetricNN(nn.Module):
 
     def forward(self, inputs):
         '''input: [batch_x, [batches_xi], [labels_yi]]'''
-        [z, zi_s, labels_yi, oracles_yi, hidden_labels] = inputs
+        [zs, zi_s, labels_yi, oracles_yi, hidden_labels] = inputs
 
         if 'gnn_iclr_active' in self.metric_network:
-           return self.gnn_iclr_active_forward(z, zi_s, labels_yi, oracles_yi, hidden_labels)
+           return self.gnn_iclr_active_forward(zs, zi_s, labels_yi, oracles_yi, hidden_labels)
         elif 'gnn_iclr' in self.metric_network:
-            return self.gnn_iclr_forward(z, zi_s, labels_yi)
+            return self.gnn_iclr_forward(zs, zi_s, labels_yi)
         else:
             raise NotImplementedError
 
@@ -178,7 +184,9 @@ class SoftmaxModule():
 
     def forward(self, outputs):
         if self.softmax_metric == 'log_softmax':
-            return F.log_softmax(outputs)
+            # (batch_size, n_output) 2d still okay, but transductive requires
+            # dim to be -1
+            return F.log_softmax(outputs, dim=-1)
         else:
             raise(NotImplementedError)
 
