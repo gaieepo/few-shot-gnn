@@ -109,7 +109,9 @@ def train_batch(model, data):
     # label_x_numpy = label_x.cpu().data.numpy()
     label_xs_numpy = [label_x.cpu().data.numpy() for label_x in label_xs]
     formatted_label_xs = [Variable(torch.LongTensor(np.argmax(label_x_numpy, axis=-1))) for label_x_numpy in label_xs_numpy]
-    formatted_label_xs = torch.cat(formatted_label_xs)  # for nll_loss
+    # formatted_label_xs = torch.cat(formatted_label_xs)  BUG WRONG CORRESPONDENCE
+    formatted_label_xs = torch.stack(formatted_label_xs).t().flatten()  # for nll_loss
+
     if args.cuda:
         formatted_label_xs = formatted_label_xs.cuda()
     loss = F.nll_loss(logsoft_prob, formatted_label_xs)

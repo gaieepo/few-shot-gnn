@@ -54,7 +54,8 @@ def test_one_shot(args, model, test_samples=5000, partition='test'):
 
         labels_xs_cpu = [labels_x_cpu.cpu().data.numpy() for labels_x_cpu in labels_xs_cpu]
         labels_xs_cpu = [np.argmax(labels_x_cpu, axis=-1) for labels_x_cpu in labels_xs_cpu]
-        labels_xs_cpu = np.concatenate(labels_xs_cpu)
+        # labels_xs_cpu = np.concatenate(labels_xs_cpu) BUG WRONG CORRESPONDENCE
+        labels_xs_cpu = np.array(labels_xs_cpu).T.flatten()
 
         for row_i in range(y_preds.shape[0]):
             if y_preds[row_i] == labels_xs_cpu[row_i]:
