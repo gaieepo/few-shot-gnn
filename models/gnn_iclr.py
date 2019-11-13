@@ -184,8 +184,8 @@ class GNN_nl(nn.Module):
 
         if args.dataset == 'mini_imagenet':
             self.num_layers = 2
-        else:
-            self.num_layers = 2
+        elif args.dataset == 'tiered_imagenet':
+            self.num_layers = args.depth
 
         for i in range(self.num_layers):
             if i == 0:

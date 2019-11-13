@@ -64,6 +64,8 @@ parser.add_argument('--transductive', action='store_true',
                     help='enables transductive training')
 parser.add_argument('--gpu', type=int, default=0,
                     help='indicate which gpu to run')
+parser.add_argument('--depth', type=int, default=2, metavar='N',
+                    help='Num layers')
 args = parser.parse_args()
 
 
