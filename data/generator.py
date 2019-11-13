@@ -1,11 +1,13 @@
 from __future__ import print_function
 import torch.utils.data as data
+from PIL import Image as pil_image
 import torch
 import numpy as np
 import random
 from torch.autograd import Variable
 from . import omniglot
 from . import mini_imagenet
+from . import tiered_imagenet
 
 
 class Generator(data.Dataset):
@@ -15,15 +17,22 @@ class Generator(data.Dataset):
         self.args = args
 
         assert (dataset == 'omniglot' or
-                dataset == 'mini_imagenet'), 'Incorrect dataset partition'
+                dataset == 'mini_imagenet' or
+                dataset == 'tiered_imagenet'
+                ), 'Incorrect dataset partition'
         self.dataset = dataset
 
         if self.dataset == 'omniglot':
             self.input_channels = 1
             self.size = (28, 28)
-        else:
+        elif self.dataset == 'mini_imagenet':
             self.input_channels = 3
             self.size = (84, 84)
+        elif self.dataset == 'tiered_imagenet':
+            self.input_channels = 3
+            self.size = (84, 84)
+        else:
+            raise ValueError('unknown dataset')
 
         if dataset == 'omniglot':
             self.loader = omniglot.Omniglot(self.root, dataset=dataset)
@@ -31,6 +40,9 @@ class Generator(data.Dataset):
         elif dataset == 'mini_imagenet':
             self.loader = mini_imagenet.MiniImagenet(self.root)
             self.data, self.label_encoder = self.loader.load_dataset(self.partition, self.size)
+        elif dataset == 'tiered_imagenet':
+            self.loader = tiered_imagenet.TieredImagenet(self.root)
+            self.data = self.loader.load_dataset(self.partition, self.size)
         else:
             raise NotImplementedError
 
@@ -43,6 +55,27 @@ class Generator(data.Dataset):
         for channel in range(image.shape[0]):
             rotated_image[channel, :, :] = np.rot90(image[channel, :, :], k=times)
         return rotated_image
+
+    def load_image_samples(self, samples):
+        if self.dataset != 'tiered_imagenet':
+            return samples
+
+        samples_data = []
+        for sample in samples:
+            image_data = np.array(pil_image.open(sample), dtype='float32')
+
+            # WARNING! BGR -> RGB
+            image_data = image_data[..., ::-1]
+
+            # Normalize
+            image_data = np.transpose(image_data, (2, 0, 1))
+            image_data[0, :, :] -= 120.45  # R
+            image_data[1, :, :] -= 115.74  # G
+            image_data[2, :, :] -= 104.65  # B
+            image_data /= 127.5
+
+            samples_data.append(image_data)
+        return samples_data
 
     def get_task_batch(self, batch_size=5, n_way=20, num_shots=1, transductive=False, unlabeled_extra=0, cuda=False, variable=False):
         # Init variables
@@ -91,6 +124,7 @@ class Generator(data.Dataset):
                 if transductive:
                     # every class take num_shots + 1
                     samples = random.sample(self.data[class_], num_shots + 1)
+                    samples = self.load_image_samples(samples)
                     # take first sample for all classes
                     batch_xs[class_counter][batch_counter, :, :, :] = samples[0]
                     labels_xs[class_counter][batch_counter, class_counter] = 1
@@ -99,6 +133,7 @@ class Generator(data.Dataset):
                 elif class_counter == positive_class:  # non-transductive
                     # We take num_shots + 1 samples for one class
                     samples = random.sample(self.data[class_], num_shots + 1)
+                    samples = self.load_image_samples(samples)
                     # Test sample is loaded (1st sample)
                     batch_xs[0][batch_counter, :, :, :] = samples[0]
                     labels_xs[0][batch_counter, class_counter] = 1  # one-hot
@@ -106,6 +141,7 @@ class Generator(data.Dataset):
                     samples = samples[1::]
                 else:
                     samples = random.sample(self.data[class_], num_shots)
+                    samples = self.load_image_samples(samples)
 
                 for s_i in range(0, len(samples)):
                     batches_xi[indexes_perm[counter]][batch_counter, :, :, :] = samples[s_i]

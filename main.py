@@ -33,7 +33,7 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=20, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--save_interval', type=int, default=300000, metavar='N',
+parser.add_argument('--save_interval', type=int, default=1000, metavar='N',
                     help='how many batches between each model saving')
 parser.add_argument('--test_interval', type=int, default=2000, metavar='N',
                     help='how many batches between each test')
@@ -56,7 +56,7 @@ parser.add_argument('--dataset_root', type=str, default='datasets', metavar='N',
 parser.add_argument('--test_samples', type=int, default=30000, metavar='N',
                     help='Number of shots')
 parser.add_argument('--dataset', type=str, default='mini_imagenet', metavar='N',
-                    help='omniglot')
+                    help='mini_imagenet & omniglot & tiered_imagenet')
 parser.add_argument('--dec_lr', type=int, default=10000, metavar='N',
                     help='Decreasing the learning rate every x iterations')
 # customized
